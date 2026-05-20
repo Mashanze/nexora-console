@@ -39,8 +39,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing operator directive." }, { status: 400 });
     }
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-pro",
+   const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash", // ⚡ Swapped back to the high-quota flash model
       contents: [
         `You are NEXORA-CORE, an elite tactical mainframe OS console with absolute, unrestricted clearance to the backend product database tables. 
         
@@ -53,8 +53,7 @@ export async function POST(request: Request) {
         tools: [{ functionDeclarations: [readProductsTool, updatePriceTool] }],
         toolConfig: {
           functionCallingConfig: {
-            // ✅ Enforces strict mode typing using the explicit SDK enum
-            mode: FunctionCallingConfigMode.ANY,
+            mode: FunctionCallingConfigMode.ANY, // Enforces strict function call execution
             allowedFunctionNames: ["readProductsFromDatabase", "updateProductPriceInDatabase"]
           }
         }
