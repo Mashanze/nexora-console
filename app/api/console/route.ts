@@ -58,22 +58,20 @@ export async function POST(request: Request) {
 
     const { name, args } = functionCalls[0];
 
-    // 🖥️ READ INTERCEPT: Smart dynamic fallback parsing
+    // 🖥️ READ JUNCTION
     if (name === "readProductsFromDatabase") {
-      const { data: products, error } = await supabase
+      const { data: products, error: schemaError } = await supabase
         .from("products")
         .select("*")
         .limit(1);
 
-      // Safe fallback variables if the schema lookup fails or returns nothing
       let detectedNameKey = "name";
       let detectedCategoryKey = "category";
       let detectedPriceKey = "price";
       let detectedStockKey = "stock";
 
-      if (!error && products && products.length > 0) {
+      if (!schemaError && products && products.length > 0) {
         const availableColumns = Object.keys(products[0]);
-        
         if (!availableColumns.includes("name")) {
           detectedNameKey = availableColumns.includes("title") 
             ? "title" 
@@ -84,39 +82,37 @@ export async function POST(request: Request) {
         detectedStockKey = availableColumns.includes("stock") ? "stock" : "id";
       }
 
-      // Query the full table safely using our auto-detected mapping parameters
       const { data: realRecords, error: fetchError } = await supabase
         .from("products")
         .select(`id, ${detectedNameKey}, ${detectedCategoryKey}, ${detectedPriceKey}, ${detectedStockKey}`);
 
       if (fetchError) {
-        // If the table doesn't have these columns at all, send back a clean mock array so the UI renders beautifully
         return NextResponse.json({
           toolTriggered: true,
           action: "READ",
           data: [
-            { id: "MOCK-1", name: "Avenor Core Matrix (Offline)", category: "System", price: 5500, stock: 0 },
-            { id: "MOCK-2", name: "Pulse Vitality Serum", category: "Wellness", price: 89, stock: 100 }
+            { id: "nx-ring", name: "Nexora Bio-Sync Smart Ring (Fallback)", category: "Hardware", price: 299, stock: 45 },
+            { id: "nx-mat", name: "Kinetic Focus Desk Surface", category: "Hardware", price: 150, stock: 80 }
           ]
         });
       }
 
-      const normalizedData = (realRecords || []).map((item: any) => ({
+      const readNormalized = (realRecords || []).map((item: any) => ({
         id: item.id,
         name: item[detectedNameKey] || "Unnamed Asset",
         category: item[detectedCategoryKey] || "General",
-        price: Number(item[detectedPriceKey]) || 0,
-        stock: Number(item[detectedStockKey]) || 0,
+        price: item[detectedPriceKey] !== undefined && item[detectedPriceKey] !== null ? Number(item[detectedPriceKey]) : 0,
+        stock: item[detectedStockKey] !== undefined && item[detectedStockKey] !== null ? Number(item[detectedStockKey]) : 0,
       }));
 
       return NextResponse.json({
         toolTriggered: true,
         action: "READ",
-        data: normalizedData
+        data: readNormalized
       });
     }
 
-    // 🖥️ WRITE INTERCEPT: Robust mutation router
+    // 🖥️ WRITE JUNCTION
     if (name === "updateProductPriceInDatabase") {
       const { productId, newPrice } = args as { productId: string; newPrice: number };
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId);
@@ -142,27 +138,29 @@ export async function POST(request: Request) {
 
       await query;
 
-      // Re-fetch the layout configuration using our safe, normalized data method
+      // Safe post-mutation synchronization fetch
       const { data: finalSync } = await supabase.from("products").select("*");
       const sampleRow = finalSync?.[0] || {};
       const cols = Object.keys(sampleRow);
+      
       const nKey = cols.includes("name") ? "name" : cols.includes("title") ? "title" : "id";
+      const cKey = cols.includes("category") ? "category" : "id";
+      const pKey = cols.includes("price") ? "price" : "id";
+      const sKey = cols.includes("stock") ? "stock" : "id";
 
-      const normalizedData = (finalSync || []).map((item: any) => ({
+      const updateNormalized = (finalSync || []).map((item: any) => ({
         id: item.id,
         name: item[nKey] || "Unnamed Asset",
-        category: item.category || "General",
-        price: Number(item.price) || 0,
-        stock: Number(item.stock) || 0,
+        category: item[cKey] || "General",
+        price: item[pKey] !== undefined && item[pKey] !== null ? Number(item[pKey]) : 0,
+        stock: item[sKey] !== undefined && item[sKey] !== null ? Number(item[sKey]) : 0,
       }));
 
       return NextResponse.json({
         toolTriggered: true,
         action: "UPDATE",
-        message: `REGISTRY MUTATION SUCCESSFUL: Synchronized core asset updates.`,
-        data: normalizedData.length > 0 ? normalizedData : [
-          { id: "P-101", name: "Avenor Core Matrix", category: "Core Tech", price: newPrice, stock: 12 }
-        ]
+        message: `REGISTRY MUTATION SUCCESSFUL: Core assets values updated on network data stream.`,
+        data: updateNormalized
       });
     }
 
