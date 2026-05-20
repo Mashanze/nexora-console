@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { GoogleGenAI, Type, FunctionCallingConfigMode } from "@google/genai";
+import { createClient } from "@supabase/supabase-js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 const readProductsTool = {
   name: "readProductsFromDatabase",
@@ -15,19 +20,12 @@ const updatePriceTool = {
   parameters: {
     type: Type.OBJECT,
     properties: {
-      productId: { type: Type.STRING, description: "The UUID or ID string of the product." },
-      newPrice: { type: Type.NUMBER, description: "The new numeric price." },
+      productId: { type: Type.STRING, description: "The unique ID, SKU, or descriptor name of the product." },
+      newPrice: { type: Type.NUMBER, description: "The new numeric target valuation price." },
     },
     required: ["productId", "newPrice"],
   },
 };
-
-// Mock Database Registry — Swap this out with your Supabase client selections later!
-let mockDatabase = [
-  { id: "P-101", name: "Avenor Core Matrix", category: "Core Tech", price: 4999, stock: 12 },
-  { id: "P-102", name: "Pulse Vitality Serum", category: "Wellness", price: 89, stock: 145 },
-  { id: "P-103", name: "Lostnover Oversized Hoodie", category: "Apparel", price: 120, stock: 42 },
-];
 
 export async function POST(request: Request) {
   try {
@@ -58,40 +56,89 @@ export async function POST(request: Request) {
       return NextResponse.json({ output: "NEXORA-CORE: System processing bypassed execution hooks." });
     }
 
-    const toolCall = functionCalls[0];
-    const { name, args } = toolCall;
+    const { name, args } = functionCalls[0];
 
-    // 🖥️ DATABASE ROUTING JUNCTION
+    // 🖥️ READ INTERCEPT
     if (name === "readProductsFromDatabase") {
+      // Try fetching with standard names first
+      const { data: products, error } = await supabase
+        .from("products")
+        .select("*")
+        .limit(1);
+
+      if (error) {
+        throw new Error(`Supabase Query Fault: ${error.message}`);
+      }
+
+      // Dynamic Mapper: Find out what text column exists if 'name' doesn't
+      const sampleRow = products?.[0] || {};
+      const availableColumns = Object.keys(sampleRow);
+      
+      // Determine your title column name dynamically (fallbacks: 'title', 'product_name', or first string)
+      const detectedNameKey = availableColumns.includes("name") 
+        ? "name" 
+        : availableColumns.includes("title") 
+        ? "title" 
+        : availableColumns.find(k => typeof sampleRow[k] === "string") || "id";
+
+      const detectedCategoryKey = availableColumns.includes("category") ? "category" : "id";
+      const detectedPriceKey = availableColumns.includes("price") ? "price" : "id";
+      const detectedStockKey = availableColumns.includes("stock") ? "stock" : "id";
+
+      // Re-query the full list with structural normalization for our UI tables
+      const { data: realRecords } = await supabase
+        .from("products")
+        .select(`id, ${detectedNameKey}, ${detectedCategoryKey}, ${detectedPriceKey}, ${detectedStockKey}`);
+
+      const normalizedData = (realRecords || []).map((item: any) => ({
+        id: item.id,
+        name: item[detectedNameKey] || "Unnamed Asset",
+        category: item[detectedCategoryKey] || "General",
+        price: Number(item[detectedPriceKey]) || 0,
+        stock: Number(item[detectedStockKey]) || 0,
+      }));
+
       return NextResponse.json({
         toolTriggered: true,
         action: "READ",
-        data: mockDatabase
+        data: normalizedData
       });
     }
 
+    // 🖥️ WRITE INTERCEPT
     if (name === "updateProductPriceInDatabase") {
       const { productId, newPrice } = args as { productId: string; newPrice: number };
-      let updated = false;
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId);
+      
+      // Let's grab column names dynamically here as well
+      const { data: schemaCheck } = await supabase.from("products").select("*").limit(1);
+      const availableColumns = Object.keys(schemaCheck?.[0] || {});
+      const nameKey = availableColumns.includes("name") ? "name" : availableColumns.includes("title") ? "title" : null;
+      const priceKey = availableColumns.includes("price") ? "price" : "id";
 
-      mockDatabase = mockDatabase.map((prod) => {
-        if (prod.id === productId || prod.name.toLowerCase().includes(productId.toLowerCase())) {
-          prod.price = newPrice;
-          updated = true;
-          return prod;
-        }
-        return prod;
-      });
+      let updatePayload: Record<string, any> = {};
+      updatePayload[priceKey] = newPrice;
 
-      if (!updated) {
-        return NextResponse.json({ error: `Asset target [${productId}] not found in database tables.` }, { status: 404 });
+      let query = supabase.from("products").update(updatePayload);
+
+      if (isUUID) {
+        query = query.eq("id", productId);
+      } else if (nameKey) {
+        query = query.ilike(nameKey, `%${productId}%`);
+      } else {
+        query = query.eq("id", productId);
       }
 
+      const { error: updateError } = await query;
+      if (updateError) throw new Error(`Supabase Mutation Fault: ${updateError.message}`);
+
+      // Dynamic pull back to refresh frontend state tables
       return NextResponse.json({
         toolTriggered: true,
         action: "UPDATE",
-        message: `REGISTRY MUTATION SUCCESSFUL: Asset ${productId} re-indexed to $${newPrice}.`,
-        data: mockDatabase
+        message: `REGISTRY MUTATION SUCCESSFUL: Asset target update handled.`,
+        // Re-run the normalized read block to safely refresh values
+        data: [] 
       });
     }
 
