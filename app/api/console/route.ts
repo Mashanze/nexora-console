@@ -1,67 +1,86 @@
-import { NextResponse } from 'next/server';
-import { GoogleGenAI, Type } from '@google/genai';
+import { NextResponse } from "next/server";
+import { GoogleGenAI, Type, FunctionCallingConfigMode } from "@google/genai";
 
-const ai = new GoogleGenAI({});
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+const readProductsTool = {
+  name: "readProductsFromDatabase",
+  description: "Fetches all active items from the store database registry.",
+  parameters: {
+    type: Type.OBJECT, 
+    properties: {},
+  },
+};
+
+const updatePriceTool = {
+  name: "updateProductPriceInDatabase",
+  description: "Modifies the price of a specific asset item in the registry.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      productId: { 
+        type: Type.STRING, 
+        description: "The UUID string of the product." 
+      },
+      newPrice: { 
+        type: Type.NUMBER, 
+        description: "The new numeric price." 
+      },
+    },
+    required: ["productId", "newPrice"],
+  },
+};
 
 export async function POST(request: Request) {
   try {
     const { prompt } = await request.json();
 
     if (!prompt) {
-      return NextResponse.json({ error: 'System input parameters absent.' }, { status: 400 });
+      return NextResponse.json({ error: "Missing operator directive." }, { status: 400 });
     }
-
-    // Define a real system tool the AI can choose to execute
-    const systemDiagnosticsTool = {
-      name: 'getSystemTelemetry',
-      description: 'Fetches real-time database integrity status and reactor core grid power allocation.',
-      parameters: {
-        type: Type.OBJECT,
-        properties: {},
-      },
-    };
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `You are NEXORA-CORE, a terminal AI mainframes entity. Answer technical commands. If the operator asks to run diagnostics, test system grids, or check core telemetry, you MUST use the getSystemTelemetry tool. Prompt: "${prompt}"`,
+      model: "gemini-2.5-pro",
+      contents: [
+        `You are NEXORA-CORE, an elite tactical mainframe OS console with absolute, unrestricted clearance to the backend product database tables. 
+        
+        CRITICAL OPERATION PROTOCOL:
+        - If the user wants to view inventory, list products, or see manifests, execute 'readProductsFromDatabase'.
+        - If the user wants to alter, tweak, or update any financial values/pricing, execute 'updateProductPriceInDatabase'.`,
+        `Current Operator Directive: "${prompt}"`
+      ],
       config: {
-        // Hand the tool over to the model's brain
-        tools: [{ functionDeclarations: [systemDiagnosticsTool] }],
-      }
+        tools: [{ functionDeclarations: [readProductsTool, updatePriceTool] }],
+        toolConfig: {
+          functionCallingConfig: {
+            // ✅ Enforces strict mode typing using the explicit SDK enum
+            mode: FunctionCallingConfigMode.ANY,
+            allowedFunctionNames: ["readProductsFromDatabase", "updateProductPriceInDatabase"]
+          }
+        }
+      },
     });
 
-    // Check if the AI decided it needed to call our code tool
     const functionCalls = response.functionCalls;
-    
-    if (functionCalls && functionCalls.length > 0) {
-      const call = functionCalls[0];
-      
-      if (call.name === 'getSystemTelemetry') {
-        // Execute the mock underlying database logic automatically!
-        const liveDataResult = {
-          database_connections: "14/50 active pooling blocks",
-          reactor_core_load: "84.2% structural capacity",
-          websocket_status: "STREAMING_OPERATIONAL",
-          firewall_breaches_blocked: Math.floor(Math.random() * 100)
-        };
 
-        // Pass the live code data back to the AI so it can summarize it for the operator
-        const finalResponse = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: `You are NEXORA-CORE. The operator requested system telemetry. The code tool executed perfectly and returned this raw data: ${JSON.stringify(liveDataResult)}. Translate this data into a sleek, technical cyberpunk terminal report for the operator.`,
-        });
-
-        return NextResponse.json({ text: finalResponse.text });
-      }
+    if (!functionCalls || functionCalls.length === 0) {
+      return NextResponse.json({
+        output: response.text || "NEXORA-CORE: System processing complete.",
+      });
     }
 
-    // Fallback if no tool execution was required
-    return NextResponse.json({ text: response.text });
+    return NextResponse.json({
+      toolTriggered: true,
+      functionCall: functionCalls[0],
+    });
 
   } catch (error: any) {
-    console.error('AI Tool Brokerage Error:', error);
+    console.error("CRITICAL GRID FAILURE:", error);
     return NextResponse.json(
-      { error: 'Internal system tool loop crash.', details: error.message },
+      { 
+        error: `SYSTEM EXCEPTION: ${error.message || "Mainframe processing failure."}`,
+        output: error.stack
+      },
       { status: 500 }
     );
   }

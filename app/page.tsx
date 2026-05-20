@@ -51,32 +51,44 @@ export default function TerminalConsole() {
     if (userMessage.toUpperCase() === 'STATUS') {
       setHistory((prev) => [
         ...prev,
-        { role: 'system', content: 'TELEMENTRY STATUS: EXCELLENT\nCOGNITIVE ENGINE: GEMINI-2.5-FLASH ACTIVE\nUPLINK: SECURE SSL TUNNEL\nPORT: 3000' }
+        { role: 'system', content: 'TELEMETRY STATUS: EXCELLENT\nCOGNITIVE ENGINE: GEMINI-2.5-PRO ACTIVE\nUPLINK: SECURE SSL TUNNEL\nPORT: 3003' }
       ]);
       setIsLoading(false);
       return;
     }
 
     try {
-      // Fire payload to our internal API route handler
+      // 📡 Fetch payload from our internal API route handler
       const response = await fetch('/api/console', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: userMessage,
-          history: history.filter(h => h.content !== 'CLEAR' && h.content !== 'HELP')
-        }),
+        body: JSON.stringify({ prompt: userMessage }),
       });
 
       const data = await response.json();
 
-      if (response.ok && data.text) {
-        setHistory((prev) => [...prev, { role: 'system', content: data.text }]);
+      if (response.ok) {
+        if (data.toolTriggered) {
+          // Intercept and print out the specific tool target parameters
+          setHistory((prev) => [
+            ...prev, 
+            { role: 'system', content: `⚙️ [TOOL TRIGGERED]: Intercepted macro [${data.functionCall.name}]` },
+            { role: 'system', content: `📦 [PAYLOAD]: ${JSON.stringify(data.functionCall.args)}` }
+          ]);
+        } else {
+          setHistory((prev) => [...prev, { role: 'system', content: data.output || "NEXORA-CORE: Response resolved without text wrapper." }]);
+        }
       } else {
-        setHistory((prev) => [...prev, { role: 'system', content: `ERROR: ${data.error || 'Uplink disruption.'}` }]);
+        // Extract diagnostic log strings directly from the 500 runtime error payload
+        const errorDiagnostic = data.error || data.output || JSON.stringify(data);
+        setHistory((prev) => [
+          ...prev, 
+          { role: 'system', content: `❌ [CRITICAL GRID INTERRUPT]: Server processing pipeline failed.` },
+          { role: 'system', content: `🔍 [DIAGNOSTIC LOG]: ${errorDiagnostic}` }
+        ]);
       }
-    } catch (err) {
-      setHistory((prev) => [...prev, { role: 'system', content: 'CRITICAL CONSOLE FAULT: Server packet dropped.' }]);
+    } catch (err: any) {
+      setHistory((prev) => [...prev, { role: 'system', content: `CRITICAL CONSOLE FAULT: Local browser network packet dropped. Details: ${err.message}` }]);
     } finally {
       setIsLoading(false);
     }
@@ -91,7 +103,7 @@ export default function TerminalConsole() {
           <span>SYS_CON: ACTIVE_SYS_OP_SESSION</span>
         </div>
         <div className="hidden sm:block text-[10px] text-emerald-600/70 uppercase">
-          FRAMEWORK: NEXTJS_14 // COGNITIVE_BRAIN: GEMINI_AI
+          FRAMEWORK: NEXTJS_16 // COGNITIVE_BRAIN: GEMINI_AI
         </div>
       </div>
 
