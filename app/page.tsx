@@ -119,8 +119,7 @@ export default function ConsolePage() {
             {log}
           </div>
         ))}
-        {isLoading && <div className="text-amber-500 animate-pulse">CORE_SYS_OUT> Processing quantum matrix instruction threads...</div>}
-      </div>
+{isLoading && <div className="text-amber-500 animate-pulse">{"CORE_SYS_OUT> Processing quantum matrix instruction threads..."}</div>}      </div>
 
       {/* ======================================================= */}
       {/* VIEW PANEL 1: PRODUCT MANIFEST GRID                     */}

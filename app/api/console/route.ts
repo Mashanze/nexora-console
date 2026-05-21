@@ -4,12 +4,10 @@ import { createClient } from "@supabase/supabase-js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// Using service_role key server-side to safely bypass RLS boundaries elegantly
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-// --- MODULE 1 TOOLS ---
 const readProductsTool = {
   name: "readProductsFromDatabase",
   description: "Fetches all active items from the store product inventory registry.",
@@ -29,20 +27,19 @@ const updatePriceTool = {
   },
 };
 
-// --- MODULE 2 TOOLS ---
 const readVenturesTool = {
   name: "readVenturesFromDatabase",
-  description: "Fetches active business ventures, their financial metrics, and operational launch task checklists.",
+  description: "Fetches active business ventures, side hustles, brand metrics, and checklists.",
   parameters: { type: Type.OBJECT, properties: {} },
 };
 
 const toggleTaskTool = {
   name: "toggleVentureTaskCompletion",
-  description: "Marks a venture milestone task checklist item as complete or incomplete based on its descriptive title.",
+  description: "Marks a venture milestone task checklist item as complete or incomplete.",
   parameters: {
     type: Type.OBJECT,
     properties: {
-      taskSearchString: { type: Type.STRING, description: "Key terms matching the task description text to cross off." },
+      taskSearchString: { type: Type.STRING, description: "Key terms matching the task description text." },
       shouldBeComplete: { type: Type.BOOLEAN, description: "True to mark done, false to reopen." }
     },
     required: ["taskSearchString", "shouldBeComplete"],
@@ -54,17 +51,15 @@ export async function POST(request: Request) {
     const { prompt } = await request.json();
     if (!prompt) return NextResponse.json({ error: "Missing operator directive." }, { status: 400 });
 
-   const response = await ai.models.generateContent({
+    const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [
         `You are NEXORA-CORE, an elite tactical mainframe OS console.
-         Analyze the operator's prompt and select the absolute correct tool:
-         
-         1. 'readProductsFromDatabase': Use ONLY if they explicitly want to view store products, inventory items, stock counts, or asset pricing.
-         2. 'updateProductPriceInDatabase': Use ONLY when they explicitly want to alter, modify, or change a product's price.
-         
-         3. 'readVenturesFromDatabase': Use ONLY if they mention "ventures", "brands", "companies", "side hustles", "startups", "metrics", "checklists", or "tasks".
-         4. 'toggleVentureTaskCompletion': Use ONLY if they tell you to complete, check off, mark done, or finish a milestone task/checklist item.`,
+         Select the correct system capability based on operator request:
+         - View inventory items/products -> 'readProductsFromDatabase'
+         - Change product pricing structure -> 'updateProductPriceInDatabase'
+         - View active businesses, side hustles, startups, metrics, or checklists -> 'readVenturesFromDatabase'
+         - Check off tasks, change completion statuses, or finish a milestone -> 'toggleVentureTaskCompletion'`,
         `Current Operator Directive: "${prompt}"`
       ],
       config: {
@@ -82,16 +77,15 @@ export async function POST(request: Request) {
         }
       },
     });
+
     const functionCalls = response.functionCalls;
     if (!functionCalls || functionCalls.length === 0) {
-      return NextResponse.json({ output: "NEXORA-CORE: Intelligence cluster bypassed execution hooks." });
+      return NextResponse.json({ output: "NEXORA-CORE: System processing bypassed execution hooks." });
     }
 
     const { name, args } = functionCalls[0];
 
-    // ==========================================
-    // 🖥️ MODULE 1 JUNCTIONS
-    // ==========================================
+    // 🖥️ PRODUCTS READ
     if (name === "readProductsFromDatabase") {
       const { data: realRecords, error: fetchError } = await supabase
         .from("products")
@@ -110,6 +104,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ toolTriggered: true, action: "READ_PRODUCTS", data: readNormalized });
     }
 
+    // 🖥️ PRODUCT PRICE UPDATE
     if (name === "updateProductPriceInDatabase") {
       const { productId, newPrice } = args as { productId: string; newPrice: number };
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId);
@@ -137,11 +132,8 @@ export async function POST(request: Request) {
       });
     }
 
-    // ==========================================
-    // 🖥️ MODULE 2 JUNCTIONS (NEW VENTURE METRICS)
-    // ==========================================
+    // 🖥️ VENTURES READ
     if (name === "readVenturesFromDatabase") {
-      // Fetch ventures alongside their nested checklists relationally
       const { data: venturesList, error: ventError } = await supabase
         .from("ventures")
         .select(`
@@ -162,10 +154,10 @@ export async function POST(request: Request) {
       });
     }
 
+    // 🖥️ TASK TOGGLE
     if (name === "toggleVentureTaskCompletion") {
       const { taskSearchString, shouldBeComplete } = args as { taskSearchString: string; shouldBeComplete: boolean };
 
-      // Update task record matching string text parameters
       const { error: taskUpdateError } = await supabase
         .from("venture_tasks")
         .update({ is_completed: shouldBeComplete })
@@ -173,7 +165,6 @@ export async function POST(request: Request) {
 
       if (taskUpdateError) return NextResponse.json({ error: taskUpdateError.message }, { status: 500 });
 
-      // Pull down updated database tree structure to refresh UI panels instantly
       const { data: refreshedVentures } = await supabase
         .from("ventures")
         .select(`
