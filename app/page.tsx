@@ -88,7 +88,7 @@ export default function ConsolePage() {
             {log}
           </div>
         ))}
-        {isLoading && <div className="text-amber-500 animate-pulse">CORE_SYS_OUT&gt; Processing quantum matrix instruction threads...</div>}
+        {isLoading && <div className="text-amber-500 animate-pulse">CORE_SYS_OUT> Processing quantum matrix instruction threads...</div>}
       </div>
 
       {/* Real-time Synced Database Inventory Data Grid Visualizer */}
