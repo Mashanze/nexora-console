@@ -69,7 +69,7 @@ export default function ConsolePage() {
           setLogs((prev) => [...prev, `CORE_SYS_OUT> ⚡ ${result.message}`]);
         }
 
-        // Dynamically toggle rendering states depending on the backend action response
+        // Dynamically toggle rendering states cleanly regardless of custom logs
         if (result.action === "READ_PRODUCTS") {
           setRegistryData(result.data);
           setCurrentView("PRODUCTS");
@@ -119,13 +119,18 @@ export default function ConsolePage() {
             {log}
           </div>
         ))}
-{isLoading && <div className="text-amber-500 animate-pulse">{"CORE_SYS_OUT> Processing quantum matrix instruction threads..."}</div>}      </div>
+        {isLoading && (
+          <div className="text-amber-500 animate-pulse">
+            {"CORE_SYS_OUT> Processing quantum matrix instruction threads..."}
+          </div>
+        )}
+      </div>
 
       {/* ======================================================= */}
       {/* VIEW PANEL 1: PRODUCT MANIFEST GRID                     */}
       {/* ======================================================= */}
       {currentView === "PRODUCTS" && registryData.length > 0 && (
-        <div className="border border-emerald-950 bg-neutral-950 rounded p-4 mb-6 overflow-x-auto animate-fadeIn">
+        <div className="border border-emerald-950 bg-neutral-950 rounded p-4 mb-6 overflow-x-auto transition-all duration-300">
           <div className="text-emerald-400 text-xs font-bold uppercase tracking-wider mb-3 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
             Live Registry Asset Data Monitor
@@ -159,7 +164,7 @@ export default function ConsolePage() {
       {/* VIEW PANEL 2: SIDE HUSTLE & VENTURE MATRIX MODULE       */}
       {/* ======================================================= */}
       {currentView === "VENTURES" && venturesData.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 animate-fadeIn">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 transition-all duration-300">
           {venturesData.map((venture) => (
             <div key={venture.id} className="border border-emerald-950 bg-neutral-950 rounded p-4 flex flex-col justify-between">
               <div>
