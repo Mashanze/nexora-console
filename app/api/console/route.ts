@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { GoogleGenAI, Type, FunctionCallingConfigMode } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
 
-// Initialize Cognitive Engines
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -21,7 +20,7 @@ const updatePriceTool = {
   parameters: {
     type: Type.OBJECT,
     properties: {
-      productId: { type: Type.STRING, description: "The unique ID, SKU, or descriptor name of the product." },
+      productId: { type: Type.STRING, description: "The unique ID, token, or title name of the product." },
       newPrice: { type: Type.NUMBER, description: "The new numeric target valuation price." },
     },
     required: ["productId", "newPrice"],
@@ -36,7 +35,7 @@ export async function POST(request: Request) {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [
-        `You are NEXORA-CORE, an elite tactical mainframe OS console with absolute clearance.
+        `You are NEXORA-CORE, an elite tactical mainframe OS console.
          - View inventory/manifest demands -> execute 'readProductsFromDatabase'
          - Financial adjustments/pricing modifications -> execute 'updateProductPriceInDatabase'`,
         `Current Operator Directive: "${prompt}"`
@@ -59,46 +58,24 @@ export async function POST(request: Request) {
 
     const { name, args } = functionCalls[0];
 
-   
-// 🖥️ READ JUNCTION
+    // 🖥️ READ JUNCTION
     if (name === "readProductsFromDatabase") {
       const { data: realRecords, error: fetchError } = await supabase
         .from("products")
-        .select("*"); // Pull the entire row object so we can parse keys manually
+        .select("id, title, tag, price_zar, stock_count");
 
-      if (fetchError || !realRecords || realRecords.length === 0) {
-        return NextResponse.json({
-          toolTriggered: true,
-          action: "READ",
-          data: [
-            { id: "nx-ring", name: "Nexora Bio-Sync Smart Ring", category: "Hardware", price: 299, stock: 45 },
-            { id: "nx-mat", name: "Kinetic Focus Desk Surface", category: "Hardware", price: 150, stock: 80 }
-          ]
-        });
+      if (fetchError) {
+        console.error("Database read error:", fetchError);
+        return NextResponse.json({ error: fetchError.message }, { status: 500 });
       }
 
-      // Explicitly extract whatever key combinations exist in the database
-      const readNormalized = realRecords.map((item: any) => {
-        // Find whichever name key exists
-        const nameValue = item.name || item.title || item.description || item.id;
-        
-        // Find whichever category key exists
-        const catValue = item.category || item.type || item.registry_category || "General";
-        
-        // Find whichever numeric price key exists
-        const priceValue = item.price ?? item.valuation ?? item.cost ?? item.amount ?? 0;
-        
-        // Find whichever numeric stock key exists
-        const stockValue = item.stock ?? item.quantity ?? item.units ?? item.count ?? 0;
-
-        return {
-          id: item.id || "unknown",
-          name: String(nameValue),
-          category: String(catValue),
-          price: Number(priceValue) || 0,
-          stock: Number(stockValue) || 0
-        };
-      });
+      const readNormalized = (realRecords || []).map((item: any) => ({
+        id: item.id,
+        name: item.title || "Unnamed Asset",
+        category: item.tag || "General",
+        price: Number(item.price_zar) || 0,
+        stock: Number(item.stock_count) || 0,
+      }));
 
       return NextResponse.json({
         toolTriggered: true,
@@ -106,50 +83,43 @@ export async function POST(request: Request) {
         data: readNormalized
       });
     }
-    // 🖥️ WRITE GATEWAY
+
+    // 🖥️ WRITE JUNCTION
     if (name === "updateProductPriceInDatabase") {
       const { productId, newPrice } = args as { productId: string; newPrice: number };
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId);
       
-      let query = supabase.from("products").update({ price: newPrice });
+      // Target price_zar directly
+      let query = supabase.from("products").update({ price_zar: newPrice });
 
       if (isUUID) {
         query = query.eq("id", productId);
       } else {
-        query = query.ilike("name", `%${productId}%`);
+        query = query.ilike("title", `%${productId}%`);
       }
 
       const { error: updateError } = await query;
-
-      // Handle the update verification step
-      const { data: finalSync, error: syncError } = await supabase
-        .from("products")
-        .select("id, name, category, price, stock");
-
-      if (updateError || syncError || !finalSync || finalSync.length === 0) {
-        return NextResponse.json({
-          toolTriggered: true,
-          action: "UPDATE",
-          message: `REGISTRY MUTATION SUCCESSFUL: Modified local runtime variables for [${productId}] to $${newPrice}.`,
-          data: [
-            { id: "nx-ring", name: "Nexora Bio-Sync Smart Ring", category: "Hardware", price: productId.toLowerCase().includes("ring") ? newPrice : 299, stock: 45 },
-            { id: "nx-mat", name: "Kinetic Focus Desk Surface", category: "Hardware", price: productId.toLowerCase().includes("mat") ? newPrice : 150, stock: 80 }
-          ]
-        });
+      if (updateError) {
+        return NextResponse.json({ error: `Update failed: ${updateError.message}` }, { status: 500 });
       }
 
-      const updateNormalized = finalSync.map((item: any) => ({
+      // Fetch fresh synced records for the terminal UI layout
+      const { data: finalSync } = await supabase
+        .from("products")
+        .select("id, title, tag, price_zar, stock_count");
+
+      const updateNormalized = (finalSync || []).map((item: any) => ({
         id: item.id,
-        name: item.name || "Unnamed Asset",
-        category: item.category || "General",
-        price: Number(item.price) || 0,
-        stock: Number(item.stock) || 0,
+        name: item.title || "Unnamed Asset",
+        category: item.tag || "General",
+        price: Number(item.price_zar) || 0,
+        stock: Number(item.stock_count) || 0,
       }));
 
       return NextResponse.json({
         toolTriggered: true,
         action: "UPDATE",
-        message: `REGISTRY MUTATION SUCCESSFUL: Values synchronized across live production databases.`,
+        message: `REGISTRY MUTATION SUCCESSFUL: Synchronized asset parameters across live production clusters.`,
         data: updateNormalized
       });
     }
