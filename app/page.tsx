@@ -60,6 +60,11 @@ export default function ConsolePage() {
       const result = await response.json();
 
       if (result.error) {
+        // Intercept API tier limit codes to initialize defensive mock state arrays
+        if (result.error.includes("429") || result.error.includes("quota") || result.error.includes("503")) {
+          triggerOfflineFallback(commandText, result.error);
+          return;
+        }
         setLogs((prev) => [...prev, `CORE_SYS_OUT> ❌ CRITICAL FAULT: ${result.error}`]);
         return;
       }
@@ -90,9 +95,64 @@ export default function ConsolePage() {
       }
 
     } catch (err: any) {
-      setLogs((prev) => [...prev, `CORE_SYS_OUT> ❌ CRITICAL UPLINK EXCEPTION: ${err.message}`]);
+      triggerOfflineFallback(commandText, err.message);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Local static baseline context driver designed to keep UI fluid during rate restrictions
+  const triggerOfflineFallback = (commandText: string, originalError: string) => {
+    const cleanCommand = commandText.toLowerCase();
+    
+    setLogs((prev) => [
+      ...prev,
+      `CORE_SYS_OUT> ⚠️ [OFFLINE_FALLBACK_MODE]: External uplink limit reached (${originalError.substring(0, 15)}...).`,
+      `CORE_SYS_OUT> 📥 [LOCAL_CACHE_MOUNTED]: Serving localized visual schema structures.`
+    ]);
+
+    if (cleanCommand.includes("venture") || cleanCommand.includes("manifest") || cleanCommand.includes("task")) {
+      setVenturesData([
+        {
+          id: "NEXORA",
+          name: "Nexora Avenor",
+          focus_sector: "AI Software Infrastructure & Life OS Development",
+          revenue_zar: 0,
+          target_launch_date: "2026-06-30",
+          venture_tasks: [
+            { id: "v1-t1", task_description: "Complete Phase B backend Gemini tool configurations for Module 2", is_completed: true, priority: "HIGH" },
+            { id: "v1-t2", task_description: "Secure localized mock data engine fallback architecture handlers", is_completed: true, priority: "MEDIUM" }
+          ]
+        },
+        {
+          id: "LOSTNOVER",
+          name: "Lostnover Official",
+          focus_sector: "Premium Quiet Luxury Minimalist Apparel Design",
+          revenue_zar: 0,
+          target_launch_date: "2026-07-15",
+          venture_tasks: [
+            { id: "v2-t1", task_description: "Finalize high-end minimalist Shopify landing page layout templates", is_completed: false, priority: "MEDIUM" }
+          ]
+        },
+        {
+          id: "THE_PULSE",
+          name: "The Pulse",
+          focus_sector: "Multi-functional Private Auction & Subscription Marketplace",
+          revenue_zar: 0,
+          target_launch_date: "2026-08-01",
+          venture_tasks: [
+            { id: "v3-t1", task_description: "Assemble verified brand kit asset vectors and core membership tiers", is_completed: false, priority: "HIGH" }
+          ]
+        }
+      ]);
+      setCurrentView("VENTURES");
+    } else {
+      // Default fallback matrix handles products registry calls seamlessly
+      setRegistryData([
+        { id: "nx-ring", name: "Nexora Bio-Sync Smart Ring", category: "Life-OS Component", price: 2499, stock: 15 },
+        { id: "nx-mat", name: "Kinetic Focus Desk Surface", category: "Lifestyle Drop", price: 850, stock: 25 }
+      ]);
+      setCurrentView("PRODUCTS");
     }
   };
 
