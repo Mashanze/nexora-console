@@ -4,26 +4,48 @@ import { createClient } from "@supabase/supabase-js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+// Using service_role key server-side to safely bypass RLS boundaries elegantly
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+// --- MODULE 1 TOOLS ---
 const readProductsTool = {
   name: "readProductsFromDatabase",
-  description: "Fetches all active items from the store database registry.",
+  description: "Fetches all active items from the store product inventory registry.",
   parameters: { type: Type.OBJECT, properties: {} },
 };
 
 const updatePriceTool = {
   name: "updateProductPriceInDatabase",
-  description: "Modifies the price of a specific asset item in the registry.",
+  description: "Modifies the price of a specific asset item in the registry using its name or id.",
   parameters: {
     type: Type.OBJECT,
     properties: {
-      productId: { type: Type.STRING, description: "The unique ID, token, or title name of the product." },
+      productId: { type: Type.STRING, description: "The unique ID or description name of the product." },
       newPrice: { type: Type.NUMBER, description: "The new numeric target valuation price." },
     },
     required: ["productId", "newPrice"],
+  },
+};
+
+// --- MODULE 2 TOOLS ---
+const readVenturesTool = {
+  name: "readVenturesFromDatabase",
+  description: "Fetches active business ventures, their financial metrics, and operational launch task checklists.",
+  parameters: { type: Type.OBJECT, properties: {} },
+};
+
+const toggleTaskTool = {
+  name: "toggleVentureTaskCompletion",
+  description: "Marks a venture milestone task checklist item as complete or incomplete based on its descriptive title.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      taskSearchString: { type: Type.STRING, description: "Key terms matching the task description text to cross off." },
+      shouldBeComplete: { type: Type.BOOLEAN, description: "True to mark done, false to reopen." }
+    },
+    required: ["taskSearchString", "shouldBeComplete"],
   },
 };
 
@@ -36,16 +58,24 @@ export async function POST(request: Request) {
       model: "gemini-2.5-flash",
       contents: [
         `You are NEXORA-CORE, an elite tactical mainframe OS console.
-         - View inventory/manifest demands -> execute 'readProductsFromDatabase'
-         - Financial adjustments/pricing modifications -> execute 'updateProductPriceInDatabase'`,
+         Select the correct system capability based on operator request:
+         - View inventory items/products -> 'readProductsFromDatabase'
+         - Change product pricing structure -> 'updateProductPriceInDatabase'
+         - View active businesses, side hustles, or startup checklist timelines -> 'readVenturesFromDatabase'
+         - Check off tasks, change completion statuses, or finish a milestone -> 'toggleVentureTaskCompletion'`,
         `Current Operator Directive: "${prompt}"`
       ],
       config: {
-        tools: [{ functionDeclarations: [readProductsTool, updatePriceTool] }],
+        tools: [{ functionDeclarations: [readProductsTool, updatePriceTool, readVenturesTool, toggleTaskTool] }],
         toolConfig: {
           functionCallingConfig: {
             mode: FunctionCallingConfigMode.ANY,
-            allowedFunctionNames: ["readProductsFromDatabase", "updateProductPriceInDatabase"]
+            allowedFunctionNames: [
+              "readProductsFromDatabase", 
+              "updateProductPriceInDatabase", 
+              "readVenturesFromDatabase", 
+              "toggleVentureTaskCompletion"
+            ]
           }
         }
       },
@@ -53,21 +83,20 @@ export async function POST(request: Request) {
 
     const functionCalls = response.functionCalls;
     if (!functionCalls || functionCalls.length === 0) {
-      return NextResponse.json({ output: "NEXORA-CORE: System processing bypassed execution hooks." });
+      return NextResponse.json({ output: "NEXORA-CORE: Intelligence cluster bypassed execution hooks." });
     }
 
     const { name, args } = functionCalls[0];
 
-    // 🖥️ READ JUNCTION
+    // ==========================================
+    // 🖥️ MODULE 1 JUNCTIONS
+    // ==========================================
     if (name === "readProductsFromDatabase") {
       const { data: realRecords, error: fetchError } = await supabase
         .from("products")
         .select("id, title, tag, price_zar, stock_count");
 
-      if (fetchError) {
-        console.error("Database read error:", fetchError);
-        return NextResponse.json({ error: fetchError.message }, { status: 500 });
-      }
+      if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 });
 
       const readNormalized = (realRecords || []).map((item: any) => ({
         id: item.id,
@@ -77,37 +106,20 @@ export async function POST(request: Request) {
         stock: Number(item.stock_count) || 0,
       }));
 
-      return NextResponse.json({
-        toolTriggered: true,
-        action: "READ",
-        data: readNormalized
-      });
+      return NextResponse.json({ toolTriggered: true, action: "READ_PRODUCTS", data: readNormalized });
     }
 
-    // 🖥️ WRITE JUNCTION
     if (name === "updateProductPriceInDatabase") {
       const { productId, newPrice } = args as { productId: string; newPrice: number };
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId);
       
-      // Target price_zar directly
       let query = supabase.from("products").update({ price_zar: newPrice });
-
-      if (isUUID) {
-        query = query.eq("id", productId);
-      } else {
-        query = query.ilike("title", `%${productId}%`);
-      }
+      query = isUUID ? query.eq("id", productId) : query.ilike("title", `%${productId}%`);
 
       const { error: updateError } = await query;
-      if (updateError) {
-        return NextResponse.json({ error: `Update failed: ${updateError.message}` }, { status: 500 });
-      }
+      if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 
-      // Fetch fresh synced records for the terminal UI layout
-      const { data: finalSync } = await supabase
-        .from("products")
-        .select("id, title, tag, price_zar, stock_count");
-
+      const { data: finalSync } = await supabase.from("products").select("id, title, tag, price_zar, stock_count");
       const updateNormalized = (finalSync || []).map((item: any) => ({
         id: item.id,
         name: item.title || "Unnamed Asset",
@@ -118,16 +130,71 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         toolTriggered: true,
-        action: "UPDATE",
+        action: "READ_PRODUCTS",
         message: `REGISTRY MUTATION SUCCESSFUL: Synchronized asset parameters across live production clusters.`,
         data: updateNormalized
+      });
+    }
+
+    // ==========================================
+    // 🖥️ MODULE 2 JUNCTIONS (NEW VENTURE METRICS)
+    // ==========================================
+    if (name === "readVenturesFromDatabase") {
+      // Fetch ventures alongside their nested checklists relationally
+      const { data: venturesList, error: ventError } = await supabase
+        .from("ventures")
+        .select(`
+          id,
+          name,
+          focus_sector,
+          revenue_zar,
+          target_launch_date,
+          venture_tasks ( id, task_description, is_completed, priority )
+        `);
+
+      if (ventError) return NextResponse.json({ error: ventError.message }, { status: 500 });
+
+      return NextResponse.json({
+        toolTriggered: true,
+        action: "READ_VENTURES",
+        data: venturesList || []
+      });
+    }
+
+    if (name === "toggleVentureTaskCompletion") {
+      const { taskSearchString, shouldBeComplete } = args as { taskSearchString: string; shouldBeComplete: boolean };
+
+      // Update task record matching string text parameters
+      const { error: taskUpdateError } = await supabase
+        .from("venture_tasks")
+        .update({ is_completed: shouldBeComplete })
+        .ilike("task_description", `%${taskSearchString}%`);
+
+      if (taskUpdateError) return NextResponse.json({ error: taskUpdateError.message }, { status: 500 });
+
+      // Pull down updated database tree structure to refresh UI panels instantly
+      const { data: refreshedVentures } = await supabase
+        .from("ventures")
+        .select(`
+          id,
+          name,
+          focus_sector,
+          revenue_zar,
+          target_launch_date,
+          venture_tasks ( id, task_description, is_completed, priority )
+        `);
+
+      return NextResponse.json({
+        toolTriggered: true,
+        action: "READ_VENTURES",
+        message: `VENTURE OPERATION UPDATED: Task matching status synced successfully.`,
+        data: refreshedVentures || []
       });
     }
 
     return NextResponse.json({ output: "Unhandled tool execution hook mapped." });
 
   } catch (error: any) {
-    console.error("CRITICAL GRID FAILURE:", error);
     return NextResponse.json({ error: `SYSTEM EXCEPTION: ${error.message}` }, { status: 500 });
   }
 }
