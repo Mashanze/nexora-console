@@ -54,15 +54,17 @@ export async function POST(request: Request) {
     const { prompt } = await request.json();
     if (!prompt) return NextResponse.json({ error: "Missing operator directive." }, { status: 400 });
 
-    const response = await ai.models.generateContent({
+   const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [
         `You are NEXORA-CORE, an elite tactical mainframe OS console.
-         Select the correct system capability based on operator request:
-         - View inventory items/products -> 'readProductsFromDatabase'
-         - Change product pricing structure -> 'updateProductPriceInDatabase'
-         - View active businesses, side hustles, or startup checklist timelines -> 'readVenturesFromDatabase'
-         - Check off tasks, change completion statuses, or finish a milestone -> 'toggleVentureTaskCompletion'`,
+         Analyze the operator's prompt and select the absolute correct tool:
+         
+         1. 'readProductsFromDatabase': Use ONLY if they explicitly want to view store products, inventory items, stock counts, or asset pricing.
+         2. 'updateProductPriceInDatabase': Use ONLY when they explicitly want to alter, modify, or change a product's price.
+         
+         3. 'readVenturesFromDatabase': Use ONLY if they mention "ventures", "brands", "companies", "side hustles", "startups", "metrics", "checklists", or "tasks".
+         4. 'toggleVentureTaskCompletion': Use ONLY if they tell you to complete, check off, mark done, or finish a milestone task/checklist item.`,
         `Current Operator Directive: "${prompt}"`
       ],
       config: {
@@ -80,7 +82,6 @@ export async function POST(request: Request) {
         }
       },
     });
-
     const functionCalls = response.functionCalls;
     if (!functionCalls || functionCalls.length === 0) {
       return NextResponse.json({ output: "NEXORA-CORE: Intelligence cluster bypassed execution hooks." });
