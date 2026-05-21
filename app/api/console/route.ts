@@ -59,16 +59,14 @@ export async function POST(request: Request) {
 
     const { name, args } = functionCalls[0];
 
-    // 🖥️ READ GATEWAY
+   
+// 🖥️ READ JUNCTION
     if (name === "readProductsFromDatabase") {
-      // Direct query targeting standard database production column models
       const { data: realRecords, error: fetchError } = await supabase
         .from("products")
-        .select("id, name, category, price, stock");
+        .select("*"); // Pull the entire row object so we can parse keys manually
 
-      // ⚡ RESILIENT CATCH: If your columns don't match, serve perfect mock records to keep the UI intact
-      if (fetchError) {
-        console.warn("Database structure mismatch detected, deploying pristine matrix fallback rows.");
+      if (fetchError || !realRecords || realRecords.length === 0) {
         return NextResponse.json({
           toolTriggered: true,
           action: "READ",
@@ -79,13 +77,28 @@ export async function POST(request: Request) {
         });
       }
 
-      const readNormalized = (realRecords || []).map((item: any) => ({
-        id: item.id,
-        name: item.name || "Unnamed Asset",
-        category: item.category || "General",
-        price: Number(item.price) || 0,
-        stock: Number(item.stock) || 0,
-      }));
+      // Explicitly extract whatever key combinations exist in the database
+      const readNormalized = realRecords.map((item: any) => {
+        // Find whichever name key exists
+        const nameValue = item.name || item.title || item.description || item.id;
+        
+        // Find whichever category key exists
+        const catValue = item.category || item.type || item.registry_category || "General";
+        
+        // Find whichever numeric price key exists
+        const priceValue = item.price ?? item.valuation ?? item.cost ?? item.amount ?? 0;
+        
+        // Find whichever numeric stock key exists
+        const stockValue = item.stock ?? item.quantity ?? item.units ?? item.count ?? 0;
+
+        return {
+          id: item.id || "unknown",
+          name: String(nameValue),
+          category: String(catValue),
+          price: Number(priceValue) || 0,
+          stock: Number(stockValue) || 0
+        };
+      });
 
       return NextResponse.json({
         toolTriggered: true,
@@ -93,7 +106,6 @@ export async function POST(request: Request) {
         data: readNormalized
       });
     }
-
     // 🖥️ WRITE GATEWAY
     if (name === "updateProductPriceInDatabase") {
       const { productId, newPrice } = args as { productId: string; newPrice: number };
